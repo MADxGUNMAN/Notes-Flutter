@@ -211,7 +211,7 @@ The APK/AAB will be in `build\app\outputs\`
 
 ## License
 
-© 2025 [Ansari Souaib]([https://github.com/MADxGUNMAN](https://souaibprojects.netlify.app/)). All rights reserved.
+© 2025 [Ansari Souaib](https://souaibprojects.netlify.app/). All rights reserved.
 
 ## Support
 
