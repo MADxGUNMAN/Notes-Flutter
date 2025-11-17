@@ -211,7 +211,7 @@ The APK/AAB will be in `build\app\outputs\`
 
 ## License
 
-© 2025 Ansari Souaib. All rights reserved.
+© 2025 [Ansari Souaib](https://github.com/MADxGUNMAN) App. All rights reserved.
 
 ## Support
 
