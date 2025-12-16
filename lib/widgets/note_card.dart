@@ -8,6 +8,9 @@ class NoteCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onDelete;
   final VoidCallback onTogglePin;
+  final VoidCallback? onToggleFavorite;
+  final VoidCallback? onArchive;
+  final VoidCallback? onUnarchive;
 
   const NoteCard({
     super.key,
@@ -15,6 +18,9 @@ class NoteCard extends StatelessWidget {
     required this.onTap,
     required this.onDelete,
     required this.onTogglePin,
+    this.onToggleFavorite,
+    this.onArchive,
+    this.onUnarchive,
   });
 
   @override
@@ -80,6 +86,12 @@ class NoteCard extends StatelessWidget {
                     onSelected: (value) {
                       if (value == 'pin') {
                         onTogglePin();
+                      } else if (value == 'favorite') {
+                        onToggleFavorite?.call();
+                      } else if (value == 'archive') {
+                        onArchive?.call();
+                      } else if (value == 'unarchive') {
+                        onUnarchive?.call();
                       } else if (value == 'delete') {
                         onDelete();
                       }

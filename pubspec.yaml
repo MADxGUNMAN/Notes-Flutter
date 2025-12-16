@@ -32,9 +32,15 @@ dependencies:
   # State Management
   flutter_riverpod: ^2.5.1
   
-  # Local Database
+  # Local Database (keeping for offline cache)
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+  
+  # Firebase
+  firebase_core: ^3.8.1
+  firebase_auth: ^5.3.4
+  cloud_firestore: ^5.6.0
+  google_sign_in: ^6.2.2
   
   # Encryption
   crypto: ^3.0.3

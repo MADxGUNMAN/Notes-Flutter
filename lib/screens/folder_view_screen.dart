@@ -42,11 +42,7 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     
     // Use search results if searching, otherwise use regular notes
     final displayNotes = _isSearching && searchQuery.isNotEmpty
-        ? ref.watch(searchResultsProvider).when(
-            data: (data) => data,
-            loading: () => notes,
-            error: (_, __) => notes,
-          )
+        ? ref.watch(searchResultsProvider)
         : notes;
 
     return Scaffold(
@@ -159,6 +155,8 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
           onTap: () => _editNote(context, notes[index]),
           onDelete: () => _deleteNote(context, notes[index]),
           onTogglePin: () => _togglePin(notes[index]),
+          onToggleFavorite: () => _toggleFavorite(notes[index]),
+          onArchive: () => _archiveNote(notes[index]),
         );
       },
     );
@@ -174,6 +172,8 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
           onTap: () => _editNote(context, notes[index]),
           onDelete: () => _deleteNote(context, notes[index]),
           onTogglePin: () => _togglePin(notes[index]),
+          onToggleFavorite: () => _toggleFavorite(notes[index]),
+          onArchive: () => _archiveNote(notes[index]),
         );
       },
     );
@@ -218,11 +218,11 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
           FilledButton(
             onPressed: () async {
               try {
-                await ref.read(notesProvider.notifier).deleteNote(note.id);
+                await ref.read(notesProvider.notifier).moveToTrash(note.id);
                 if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Note deleted')),
+                    const SnackBar(content: Text('Note moved to trash')),
                   );
                 }
               } catch (e) {
@@ -256,9 +256,46 @@ class _FolderViewScreenState extends ConsumerState<FolderViewScreen> {
     }
   }
 
+  Future<void> _toggleFavorite(Note note) async {
+    try {
+      await ref.read(notesProvider.notifier).toggleFavorite(note);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(note.isFavorite ? 'Removed from favorites' : 'Added to favorites'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _archiveNote(Note note) async {
+    try {
+      await ref.read(notesProvider.notifier).archiveNote(note.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Note archived')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
   /// Calculate contrasting color for text on colored background
   Color _getContrastColor(Color background) {
     final luminance = background.computeLuminance();
     return luminance > 0.5 ? Colors.black : Colors.white;
   }
 }
+

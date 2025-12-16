@@ -40,6 +40,12 @@ class Folder extends HiveObject {
   @HiveField(10)
   late int orderIndex; // For drag-to-reorder functionality
 
+  @HiveField(11)
+  late bool isTrashed; // Whether folder is in trash
+
+  @HiveField(12)
+  DateTime? trashedAt; // When the folder was moved to trash
+
   Folder({
     required this.id,
     required this.name,
@@ -52,6 +58,8 @@ class Folder extends HiveObject {
     this.useGradient = false,
     this.gradientColorValue,
     this.orderIndex = 0,
+    this.isTrashed = false,
+    this.trashedAt,
   });
 
   /// Get color object from stored int value
@@ -86,6 +94,8 @@ class Folder extends HiveObject {
     bool? useGradient,
     int? gradientColorValue,
     int? orderIndex,
+    bool? isTrashed,
+    DateTime? trashedAt,
   }) {
     return Folder(
       id: id ?? this.id,
@@ -99,11 +109,13 @@ class Folder extends HiveObject {
       useGradient: useGradient ?? this.useGradient,
       gradientColorValue: gradientColorValue ?? this.gradientColorValue,
       orderIndex: orderIndex ?? this.orderIndex,
+      isTrashed: isTrashed ?? this.isTrashed,
+      trashedAt: trashedAt ?? this.trashedAt,
     );
   }
 
   @override
   String toString() {
-    return 'Folder(id: $id, name: $name, isLocked: $isLocked, hasPIN: $hasPinProtection)';
+    return 'Folder(id: $id, name: $name, isLocked: $isLocked, hasPIN: $hasPinProtection, isTrashed: $isTrashed)';
   }
 }

@@ -6,10 +6,10 @@ import '../widgets/folder_card.dart';
 import '../widgets/create_folder_dialog.dart';
 import 'folder_view_screen.dart';
 import 'pin_input_screen.dart';
-import 'about_screen.dart';
 import '../utils/encryption_helper.dart';
 
 /// Home screen displaying all folders in a responsive grid
+/// Now used as a body inside MainScreen with bottom navigation
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -17,32 +17,21 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final folders = ref.watch(foldersProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notes'),
-        centerTitle: false,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const AboutScreen()),
-              );
-            },
-            tooltip: 'About',
+    return Stack(
+      children: [
+        folders.isEmpty
+            ? _buildEmptyState(context)
+            : _buildFolderGrid(context, ref, folders),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FloatingActionButton.extended(
+            onPressed: () => _showCreateFolderDialog(context, ref),
+            icon: const Icon(Icons.add),
+            label: const Text('New Folder'),
           ),
-        ],
-      ),
-      body: folders.isEmpty
-          ? _buildEmptyState(context)
-          : _buildFolderGrid(context, ref, folders),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showCreateFolderDialog(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New Folder'),
-      ),
+        ),
+      ],
     );
   }
 
@@ -78,6 +67,13 @@ class HomeScreen extends ConsumerWidget {
     WidgetRef ref,
     List<Folder> folders,
   ) {
+    // Watch the folder note counts
+    final noteCountsAsync = ref.watch(folderNoteCountProvider);
+    final noteCounts = noteCountsAsync.maybeWhen(
+      data: (counts) => counts,
+      orElse: () => <String, int>{},
+    );
+
     return LayoutBuilder(
       builder: (context, constraints) {
         // Responsive column count based on screen width
@@ -103,8 +99,10 @@ class HomeScreen extends ConsumerWidget {
           itemCount: folders.length,
           itemBuilder: (context, index) {
             final folder = folders[index];
+            final noteCount = noteCounts[folder.id] ?? 0;
             return FolderCard(
               folder: folder,
+              noteCount: noteCount,
               onTap: () => _openFolder(context, ref, folder),
               onEdit: () => _showEditFolderDialog(context, ref, folder),
               onDelete: () => _deleteFolder(context, ref, folder),
@@ -234,10 +232,10 @@ class HomeScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Folder'),
+        title: const Text('Move to Trash'),
         content: Text(
-          'Are you sure you want to delete "${folder.name}"? '
-          'All notes in this folder will be permanently deleted.',
+          'Are you sure you want to move "${folder.name}" to trash? '
+          'All notes in this folder will also be moved to trash.',
         ),
         actions: [
           TextButton(
@@ -247,11 +245,11 @@ class HomeScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               try {
-                await ref.read(foldersProvider.notifier).deleteFolder(folder.id);
+                await ref.read(foldersProvider.notifier).moveToTrash(folder.id);
                 if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Folder deleted')),
+                    const SnackBar(content: Text('Folder moved to trash')),
                   );
                 }
               } catch (e) {
@@ -266,7 +264,7 @@ class HomeScreen extends ConsumerWidget {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Delete'),
+            child: const Text('Move to Trash'),
           ),
         ],
       ),

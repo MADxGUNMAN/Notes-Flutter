@@ -29,13 +29,14 @@ class NoteAdapter extends TypeAdapter<Note> {
       isTrashed: fields[9] as bool,
       trashedAt: fields[10] as DateTime?,
       reminderDate: fields[11] as DateTime?,
+      labelIds: (fields[12] as List).cast<String>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Note obj) {
     writer
-      ..writeByte(12)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -59,7 +60,9 @@ class NoteAdapter extends TypeAdapter<Note> {
       ..writeByte(10)
       ..write(obj.trashedAt)
       ..writeByte(11)
-      ..write(obj.reminderDate);
+      ..write(obj.reminderDate)
+      ..writeByte(12)
+      ..write(obj.labelIds);
   }
 
   @override

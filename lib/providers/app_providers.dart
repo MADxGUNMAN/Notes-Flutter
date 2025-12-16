@@ -1,296 +1,414 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/note.dart';
 import '../models/folder.dart';
-import '../services/database_service.dart';
+import '../models/label.dart';
+import '../services/firestore_service.dart';
+import 'auth_providers.dart';
 
-// ==================== FOLDER PROVIDERS ====================
-
-/// Provider for the list of all folders
-/// Automatically updates when folders are modified
-final foldersProvider = StateNotifierProvider<FoldersNotifier, List<Folder>>((ref) {
-  return FoldersNotifier();
+final firestoreServiceProvider = Provider<FirestoreService>((ref) {
+  return FirestoreService();
 });
 
-class FoldersNotifier extends StateNotifier<List<Folder>> {
-  FoldersNotifier() : super([]) {
-    loadFolders();
-  }
+/// Provider for bottom navigation index
+final bottomNavIndexProvider = StateProvider<int>((ref) => 0);
 
-  /// Load all folders from database
-  void loadFolders() {
-    state = DatabaseService.getAllFolders();
-  }
-
-  /// Create a new folder
-  Future<Folder> createFolder({
-    required String name,
-    required int colorValue,
-    String? encryptedPin,
-  }) async {
-    final folder = await DatabaseService.createFolder(
-      name: name,
-      color: Color(colorValue),
-      encryptedPin: encryptedPin,
-    );
-    loadFolders();
-    return folder;
-  }
-
-  /// Update an existing folder
-  Future<void> updateFolder(Folder folder) async {
-    await DatabaseService.updateFolder(folder);
-    loadFolders();
-  }
-
-  /// Delete a folder
-  Future<void> deleteFolder(String folderId) async {
-    await DatabaseService.deleteFolder(folderId);
-    loadFolders();
-  }
-}
-
-// ==================== CURRENT FOLDER PROVIDER ====================
-
-/// Provider for the currently selected folder ID
-final currentFolderIdProvider = StateProvider<String?>((ref) => null);
-
-/// Provider for the currently selected folder object
-final currentFolderProvider = Provider<Folder?>((ref) {
-  final folderId = ref.watch(currentFolderIdProvider);
-  if (folderId == null) return null;
-  
-  final folders = ref.watch(foldersProvider);
-  return folders.firstWhere(
-    (folder) => folder.id == folderId,
-    orElse: () => folders.first,
-  );
-});
-
-// ==================== NOTE PROVIDERS ====================
-
-/// Provider for notes in the current folder
-final notesProvider = StateNotifierProvider<NotesNotifier, List<Note>>((ref) {
-  final folderId = ref.watch(currentFolderIdProvider);
-  return NotesNotifier(folderId);
-});
-
-class NotesNotifier extends StateNotifier<List<Note>> {
-  final String? folderId;
-
-  NotesNotifier(this.folderId) : super([]) {
-    loadNotes();
-  }
-
-  /// Load notes for the current folder
-  void loadNotes() {
-    final id = folderId;
-    if (id == null || id.isEmpty) {
-      state = [];
-      return;
-    }
-    state = DatabaseService.getNotesByFolder(id);
-  }
-
-  /// Create a new note
-  Future<Note> createNote({
-    required String title,
-    required String content,
-    bool isPinned = false,
-  }) async {
-    final id = folderId;
-    if (id == null || id.isEmpty) {
-      throw Exception('No folder selected');
-    }
-
-    final note = await DatabaseService.createNote(
-      title: title,
-      content: content,
-      folderId: id,
-      isPinned: isPinned,
-    );
-    loadNotes();
-    return note;
-  }
-
-  /// Update an existing note
-  Future<void> updateNote(Note note) async {
-    await DatabaseService.updateNote(note);
-    loadNotes();
-  }
-
-  /// Delete a note
-  Future<void> deleteNote(String noteId) async {
-    await DatabaseService.deleteNote(noteId);
-    loadNotes();
-  }
-
-  /// Toggle pin status of a note
-  Future<void> togglePin(Note note) async {
-    final updatedNote = note.copyWith(isPinned: !note.isPinned);
-    await updateNote(updatedNote);
-  }
-}
-
-// ==================== SEARCH PROVIDERS ====================
-
-/// Provider for search query with debouncing
-final searchQueryProvider = StateProvider<String>((ref) => '');
-
-/// Provider for debounced search results
-/// Implements 300ms debounce to prevent excessive searches
-final searchResultsProvider = StreamProvider<List<Note>>((ref) {
-  final query = ref.watch(searchQueryProvider);
-  final folderId = ref.watch(currentFolderIdProvider);
-
-  // Create a stream controller for debounced search
-  final controller = StreamController<List<Note>>();
-
-  // Debounce search by 300ms
-  final debounceTimer = Timer(const Duration(milliseconds: 300), () {
-    if (query.isEmpty) {
-      // Return notes in current folder when no search query
-      if (folderId != null && folderId.isNotEmpty) {
-        controller.add(DatabaseService.getNotesByFolder(folderId));
-      } else {
-        controller.add([]);
-      }
-    } else {
-      // Search notes
-      controller.add(DatabaseService.searchNotes(query, folderId: folderId));
-    }
-  });
-
-  ref.onDispose(() {
-    debounceTimer.cancel();
-    controller.close();
-  });
-
-  return controller.stream;
-});
-
-// ==================== LOCKED FOLDERS PROVIDER ====================
-
-/// Provider to track which folders have been unlocked in current session
-/// Map of folder ID to unlock status
+/// Provider for unlocked folders (stores folder IDs that have been unlocked)
 final unlockedFoldersProvider = StateProvider<Map<String, bool>>((ref) => {});
 
-/// Check if a folder is unlocked in current session
+/// Provider to check if a specific folder is unlocked
 final isFolderUnlockedProvider = Provider.family<bool, String>((ref, folderId) {
   final unlockedFolders = ref.watch(unlockedFoldersProvider);
   return unlockedFolders[folderId] ?? false;
 });
 
-// ==================== FAVORITES PROVIDER ====================
+// ==================== FOLDER PROVIDERS ====================
 
-/// Provider for favorite notes
-final favoritesProvider = StateNotifierProvider<FavoritesNotifier, List<Note>>((ref) {
-  return FavoritesNotifier();
+final foldersProvider = StateNotifierProvider<FoldersNotifier, List<Folder>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  return FoldersNotifier(firestoreService, user?.uid);
 });
 
-class FavoritesNotifier extends StateNotifier<List<Note>> {
-  FavoritesNotifier() : super([]) {
-    loadFavorites();
+class FoldersNotifier extends StateNotifier<List<Folder>> {
+  final FirestoreService _firestoreService;
+  final String? _userId;
+  StreamSubscription<List<Folder>>? _subscription;
+
+  FoldersNotifier(this._firestoreService, this._userId) : super([]) {
+    if (_userId != null) {
+      _subscribe();
+    }
   }
 
-  void loadFavorites() {
-    state = DatabaseService.getFavoriteNotes();
+  void _subscribe() {
+    _subscription?.cancel();
+    _subscription = _firestoreService.getFoldersStream().listen((folders) {
+      state = folders;
+    });
   }
 
-  Future<void> toggleFavorite(String noteId) async {
-    await DatabaseService.toggleFavorite(noteId);
-    loadFavorites();
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  Future<Folder> createFolder({
+    required String name,
+    required int colorValue,
+    String? encryptedPin,
+  }) async {
+    return await _firestoreService.createFolder(
+      name: name,
+      colorValue: colorValue,
+      encryptedPin: encryptedPin,
+    );
+  }
+
+  Future<void> updateFolder(Folder folder) async {
+    await _firestoreService.updateFolder(folder);
+  }
+
+  Future<void> moveToTrash(String folderId) async {
+    await _firestoreService.moveFolderToTrash(folderId);
+  }
+
+  Future<void> restoreFolder(String folderId) async {
+    await _firestoreService.restoreFolder(folderId);
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    await _firestoreService.deleteFolder(folderId);
   }
 }
 
-// ==================== ARCHIVE PROVIDER ====================
+// ==================== TRASHED FOLDERS PROVIDER ====================
 
-/// Provider for archived notes
-final archivedNotesProvider = StateNotifierProvider<ArchivedNotesNotifier, List<Note>>((ref) {
-  return ArchivedNotesNotifier();
+final trashedFoldersProvider = StreamProvider<List<Folder>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream.value([]);
+  return firestoreService.getTrashedFoldersStream();
 });
 
-class ArchivedNotesNotifier extends StateNotifier<List<Note>> {
-  ArchivedNotesNotifier() : super([]) {
-    loadArchived();
+// ==================== CURRENT FOLDER PROVIDER ====================
+
+final currentFolderIdProvider = StateProvider<String?>((ref) => null);
+
+final currentFolderProvider = Provider<Folder?>((ref) {
+  final folderId = ref.watch(currentFolderIdProvider);
+  if (folderId == null) return null;
+  
+  final folders = ref.watch(foldersProvider);
+  try {
+    return folders.firstWhere((folder) => folder.id == folderId);
+  } catch (_) {
+    return null;
   }
-
-  void loadArchived() {
-    state = DatabaseService.getArchivedNotes();
-  }
-
-  Future<void> archiveNote(String noteId) async {
-    await DatabaseService.archiveNote(noteId);
-    loadArchived();
-  }
-
-  Future<void> unarchiveNote(String noteId) async {
-    await DatabaseService.unarchiveNote(noteId);
-    loadArchived();
-  }
-}
-
-// ==================== TRASH PROVIDER ====================
-
-/// Provider for trashed notes
-final trashedNotesProvider = StateNotifierProvider<TrashedNotesNotifier, List<Note>>((ref) {
-  return TrashedNotesNotifier();
 });
 
-class TrashedNotesNotifier extends StateNotifier<List<Note>> {
-  TrashedNotesNotifier() : super([]) {
-    loadTrashed();
+// ==================== NOTE PROVIDERS ====================
+
+final notesProvider = StateNotifierProvider<NotesNotifier, List<Note>>((ref) {
+  final folderId = ref.watch(currentFolderIdProvider);
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  return NotesNotifier(firestoreService, folderId, user?.uid);
+});
+
+class NotesNotifier extends StateNotifier<List<Note>> {
+  final FirestoreService _firestoreService;
+  final String? folderId;
+  final String? _userId;
+  StreamSubscription<List<Note>>? _subscription;
+
+  NotesNotifier(this._firestoreService, this.folderId, this._userId) : super([]) {
+    if (_userId != null) {
+      _subscribe();
+    }
   }
 
-  void loadTrashed() {
-    state = DatabaseService.getTrashedNotes();
+  void _subscribe() {
+    _subscription?.cancel();
+    if (folderId != null) {
+      _subscription = _firestoreService.getNotesByFolderStream(folderId!).listen((notes) {
+        state = notes;
+      });
+    } else {
+      state = [];
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  Future<Note> createNote({
+    required String title,
+    required String content,
+    bool isPinned = false,
+  }) async {
+    if (folderId == null) {
+      throw Exception('No folder selected');
+    }
+
+    return await _firestoreService.createNote(
+      title: title,
+      content: content,
+      folderId: folderId!,
+      isPinned: isPinned,
+    );
+  }
+
+  Future<void> updateNote(Note note) async {
+    await _firestoreService.updateNote(note);
+  }
+
+  Future<void> deleteNote(String noteId) async {
+    await _firestoreService.deleteNote(noteId);
+  }
+
+  Future<void> togglePin(Note note) async {
+    await _firestoreService.togglePin(note.id, !note.isPinned);
+  }
+
+  Future<void> toggleFavorite(Note note) async {
+    await _firestoreService.toggleFavorite(note.id, !note.isFavorite);
   }
 
   Future<void> moveToTrash(String noteId) async {
-    await DatabaseService.moveToTrash(noteId);
-    loadTrashed();
+    await _firestoreService.moveToTrash(noteId);
   }
 
-  Future<void> restoreFromTrash(String noteId) async {
-    await DatabaseService.restoreFromTrash(noteId);
-    loadTrashed();
+  Future<void> archiveNote(String noteId) async {
+    await _firestoreService.archiveNote(noteId);
   }
 
-  Future<void> permanentlyDelete(String noteId) async {
-    await DatabaseService.permanentlyDeleteNote(noteId);
-    loadTrashed();
+  Future<void> unarchiveNote(String noteId) async {
+    await _firestoreService.unarchiveNote(noteId);
+  }
+}
+
+// ==================== SEARCH PROVIDERS ====================
+
+final searchQueryProvider = StateProvider<String>((ref) => '');
+
+final searchResultsProvider = Provider<List<Note>>((ref) {
+  final query = ref.watch(searchQueryProvider).toLowerCase();
+  final notes = ref.watch(notesProvider);
+
+  if (query.isEmpty) {
+    return notes;
   }
 
+  return notes.where((note) {
+    return note.title.toLowerCase().contains(query) ||
+        note.content.toLowerCase().contains(query);
+  }).toList();
+});
+
+final globalSearchQueryProvider = StateProvider<String>((ref) => '');
+
+final globalSearchResultsProvider = StreamProvider<List<Note>>((ref) {
+  final query = ref.watch(globalSearchQueryProvider).toLowerCase();
+  
+  // Return empty if query is empty to avoid fetching everything
+  if (query.isEmpty) return Stream.value([]);
+  
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  
+  // Client-side filtering of all notes stream
+  return firestoreService.getAllNotesStream().map((notes) {
+    return notes.where((note) {
+      return note.title.toLowerCase().contains(query) ||
+          note.content.toLowerCase().contains(query);
+    }).toList();
+  });
+});
+
+// ==================== ALL NOTES PROVIDER ====================
+
+final allNotesProvider = StreamProvider<List<Note>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream.value([]);
+  return firestoreService.getAllNotesStream();
+});
+
+// ==================== FOLDER NOTE COUNT PROVIDER ====================
+
+/// Provides a map of folder IDs to their note counts
+final folderNoteCountProvider = StreamProvider<Map<String, int>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream.value({});
+  
+  return firestoreService.getAllNotesStream().map((notes) {
+    final counts = <String, int>{};
+    for (final note in notes) {
+      counts[note.folderId] = (counts[note.folderId] ?? 0) + 1;
+    }
+    return counts;
+  });
+});
+
+// ==================== FAVORITES PROVIDER ====================
+
+final favoriteNotesProvider = StreamProvider<List<Note>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream.value([]);
+  
+  // Client-side filtering for favorites
+  return firestoreService.getAllNotesStream().map((notes) {
+    return notes.where((note) => note.isFavorite && !note.isArchived && !note.isTrashed).toList();
+  });
+});
+
+// ==================== ARCHIVE PROVIDERS ====================
+
+final archiveNotesProvider = StateNotifierProvider<ArchiveNotifier, AsyncValue<List<Note>>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  return ArchiveNotifier(firestoreService, user?.uid);
+});
+
+class ArchiveNotifier extends StateNotifier<AsyncValue<List<Note>>> {
+  final FirestoreService _firestoreService;
+  StreamSubscription<List<Note>>? _subscription;
+
+  ArchiveNotifier(this._firestoreService, String? userId) : super(const AsyncValue.loading()) {
+    if (userId != null) {
+      _subscription = _firestoreService.getArchivedNotesStream().listen((notes) {
+        state = AsyncValue.data(notes);
+      }, onError: (err, stack) {
+        state = AsyncValue.error(err, stack);
+      });
+    } else {
+      state = const AsyncValue.data([]);
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> unarchiveNote(String noteId) async {
+    await _firestoreService.unarchiveNote(noteId);
+  }
+  
+  Future<void> deleteNote(String noteId) async {
+    await _firestoreService.moveToTrash(noteId);
+  }
+}
+
+// ==================== TRASH PROVIDERS ====================
+
+final trashNotesProvider = StateNotifierProvider<TrashNotifier, AsyncValue<List<Note>>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  return TrashNotifier(firestoreService, user?.uid);
+});
+
+class TrashNotifier extends StateNotifier<AsyncValue<List<Note>>> {
+  final FirestoreService _firestoreService;
+  StreamSubscription<List<Note>>? _subscription;
+
+  TrashNotifier(this._firestoreService, String? userId) : super(const AsyncValue.loading()) {
+    if (userId != null) {
+      _subscription = _firestoreService.getTrashedNotesStream().listen((notes) {
+        state = AsyncValue.data(notes);
+      }, onError: (err, stack) {
+        state = AsyncValue.error(err, stack);
+      });
+    } else {
+      state = const AsyncValue.data([]);
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> restoreNote(String noteId) async {
+    await _firestoreService.restoreFromTrash(noteId);
+  }
+  
+  Future<void> deletePermanently(String noteId) async {
+    await _firestoreService.deleteNote(noteId);
+  }
+  
   Future<void> emptyTrash() async {
-    await DatabaseService.emptyTrash();
-    loadTrashed();
+    await _firestoreService.emptyTrash();
   }
 }
 
 // ==================== REMINDERS PROVIDER ====================
 
-/// Provider for notes with reminders
-final remindersProvider = StateNotifierProvider<RemindersNotifier, List<Note>>((ref) {
-  return RemindersNotifier();
+final activeRemindersProvider = StreamProvider<List<Note>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return Stream.value([]);
+  return firestoreService.getRemindersStream();
 });
 
-class RemindersNotifier extends StateNotifier<List<Note>> {
-  RemindersNotifier() : super([]) {
-    loadReminders();
+// ==================== LABELS PROVIDERS ====================
+
+final labelsProvider = StateNotifierProvider<LabelsNotifier, List<Label>>((ref) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  final user = ref.watch(currentUserProvider);
+  return LabelsNotifier(firestoreService, user?.uid);
+});
+
+class LabelsNotifier extends StateNotifier<List<Label>> {
+  final FirestoreService _firestoreService;
+  final String? _userId;
+  StreamSubscription<List<Label>>? _subscription;
+
+  LabelsNotifier(this._firestoreService, this._userId) : super([]) {
+    if (_userId != null) {
+      _subscribe();
+    }
   }
 
-  void loadReminders() {
-    state = DatabaseService.getUpcomingReminders();
+  void _subscribe() {
+    _subscription?.cancel();
+    _subscription = _firestoreService.getLabelsStream().listen((labels) {
+      state = labels;
+    });
   }
 
-  Future<void> setReminder(String noteId, DateTime reminderDate) async {
-    await DatabaseService.setReminder(noteId, reminderDate);
-    loadReminders();
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
-  Future<void> removeReminder(String noteId) async {
-    await DatabaseService.removeReminder(noteId);
-    loadReminders();
+  Future<void> createLabel({required String name, required int colorValue}) async {
+    await _firestoreService.createLabel(name: name, colorValue: colorValue);
+  }
+
+  Future<void> updateLabel(Label label) async {
+    await _firestoreService.updateLabel(label);
+  }
+
+  Future<void> deleteLabel(String labelId) async {
+    await _firestoreService.deleteLabel(labelId);
   }
 }
+
+final notesByLabelProvider = StreamProvider.family<List<Note>, String>((ref, labelId) {
+  final firestoreService = ref.watch(firestoreServiceProvider);
+  
+  // Client-side filtering
+  return firestoreService.getAllNotesStream().map((notes) {
+    return notes.where((note) => note.labelIds.contains(labelId)).toList();
+  });
+});

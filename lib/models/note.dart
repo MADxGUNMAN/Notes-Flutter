@@ -41,6 +41,9 @@ class Note extends HiveObject {
   @HiveField(11)
   DateTime? reminderDate;
 
+  @HiveField(12)
+  List<String> labelIds; // List of label IDs assigned to this note
+
   Note({
     required this.id,
     required this.title,
@@ -54,6 +57,7 @@ class Note extends HiveObject {
     this.isTrashed = false,
     this.trashedAt,
     this.reminderDate,
+    this.labelIds = const [],
   });
 
   /// Create a copy of this note with updated fields
@@ -70,6 +74,7 @@ class Note extends HiveObject {
     bool? isTrashed,
     DateTime? trashedAt,
     DateTime? reminderDate,
+    List<String>? labelIds,
   }) {
     return Note(
       id: id ?? this.id,
@@ -84,6 +89,7 @@ class Note extends HiveObject {
       isTrashed: isTrashed ?? this.isTrashed,
       trashedAt: trashedAt ?? this.trashedAt,
       reminderDate: reminderDate ?? this.reminderDate,
+      labelIds: labelIds ?? this.labelIds,
     );
   }
 

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../models/folder.dart';
-import '../services/database_service.dart';
 
 /// Card widget displaying a folder with its color theme and PIN indicator
 class FolderCard extends StatelessWidget {
   final Folder folder;
+  final int noteCount;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -12,6 +12,7 @@ class FolderCard extends StatelessWidget {
   const FolderCard({
     super.key,
     required this.folder,
+    required this.noteCount,
     required this.onTap,
     required this.onEdit,
     required this.onDelete,
@@ -19,8 +20,7 @@ class FolderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final noteCount = DatabaseService.getNotesByFolder(folder.id).length;
-    final isDefaultFolder = folder.id == DatabaseService.defaultFolderId;
+    final isDefaultFolder = folder.id == 'default_folder';
 
     return Card(
       clipBehavior: Clip.antiAlias,

@@ -2,16 +2,19 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../models/folder.dart';
+import '../models/label.dart';
 
 /// Centralized database service managing all Hive operations
-/// Handles initialization, CRUD operations for notes and folders
+/// Handles initialization, CRUD operations for notes, folders, and labels
 class DatabaseService {
   static const String _notesBoxName = 'notes';
   static const String _foldersBoxName = 'folders';
+  static const String _labelsBoxName = 'labels';
   static const String _defaultFolderId = 'default_folder';
 
   static Box<Note>? _notesBox;
   static Box<Folder>? _foldersBox;
+  static Box<Label>? _labelsBox;
 
   /// Initialize Hive database and register adapters
   /// Must be called before any database operations
@@ -25,13 +28,20 @@ class DatabaseService {
     if (!Hive.isAdapterRegistered(1)) {
       Hive.registerAdapter(FolderAdapter());
     }
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(LabelAdapter());
+    }
 
     // Open boxes
     _notesBox = await Hive.openBox<Note>(_notesBoxName);
     _foldersBox = await Hive.openBox<Folder>(_foldersBoxName);
+    _labelsBox = await Hive.openBox<Label>(_labelsBoxName);
 
     // Create default folder if it doesn't exist
     await _ensureDefaultFolder();
+    
+    // Create default labels if they don't exist
+    await _ensureDefaultLabels();
   }
 
   /// Ensure default folder exists for notes without a specific folder
@@ -47,6 +57,35 @@ class DatabaseService {
         updatedAt: DateTime.now(),
       );
       await _foldersBox!.put(_defaultFolderId, defaultFolder);
+    }
+  }
+
+  /// Ensure default labels exist
+  static Future<void> _ensureDefaultLabels() async {
+    if (_labelsBox == null) return;
+    
+    // Create Work label if it doesn't exist
+    if (_labelsBox!.get('work_label') == null) {
+      final workLabel = Label(
+        id: 'work_label',
+        name: 'Work',
+        colorValue: Colors.blue.value,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      await _labelsBox!.put('work_label', workLabel);
+    }
+    
+    // Create Personal label if it doesn't exist
+    if (_labelsBox!.get('personal_label') == null) {
+      final personalLabel = Label(
+        id: 'personal_label',
+        name: 'Personal',
+        colorValue: Colors.green.value,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      await _labelsBox!.put('personal_label', personalLabel);
     }
   }
 
@@ -222,10 +261,110 @@ class DatabaseService {
   static Future<void> close() async {
     await _notesBox?.close();
     await _foldersBox?.close();
+    await _labelsBox?.close();
   }
 
   /// Get default folder ID
   static String get defaultFolderId => _defaultFolderId;
+
+  // ==================== LABEL OPERATIONS ====================
+
+  /// Get all labels sorted by creation date
+  static List<Label> getAllLabels() {
+    if (_labelsBox == null) return [];
+    final labels = _labelsBox!.values.toList();
+    labels.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return labels;
+  }
+
+  /// Get label by ID
+  static Label? getLabelById(String id) {
+    return _labelsBox?.get(id);
+  }
+
+  /// Create a new label
+  static Future<Label> createLabel({
+    required String name,
+    required int colorValue,
+  }) async {
+    if (_labelsBox == null) {
+      throw Exception('Database not initialized');
+    }
+
+    final now = DateTime.now();
+    final label = Label(
+      id: now.millisecondsSinceEpoch.toString(),
+      name: name,
+      colorValue: colorValue,
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    await _labelsBox!.put(label.id, label);
+    return label;
+  }
+
+  /// Update an existing label
+  static Future<void> updateLabel(Label label) async {
+    if (_labelsBox == null) {
+      throw Exception('Database not initialized');
+    }
+
+    final updatedLabel = label.copyWith(updatedAt: DateTime.now());
+    await _labelsBox!.put(updatedLabel.id, updatedLabel);
+  }
+
+  /// Delete a label
+  static Future<void> deleteLabel(String labelId) async {
+    if (_labelsBox == null) {
+      throw Exception('Database not initialized');
+    }
+
+    // Remove label from all notes that have it
+    final notes = getAllNotes();
+    for (final note in notes) {
+      if (note.labelIds.contains(labelId)) {
+        final updatedLabelIds = List<String>.from(note.labelIds)..remove(labelId);
+        final updatedNote = note.copyWith(labelIds: updatedLabelIds);
+        await updateNote(updatedNote);
+      }
+    }
+
+    await _labelsBox!.delete(labelId);
+  }
+
+  /// Get notes by label
+  static List<Note> getNotesByLabel(String labelId) {
+    if (_notesBox == null) return [];
+    return _notesBox!.values
+        .where((note) => note.labelIds.contains(labelId) && !note.isArchived && !note.isTrashed)
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  }
+
+  /// Add label to note
+  static Future<void> addLabelToNote(String noteId, String labelId) async {
+    final note = getNoteById(noteId);
+    if (note == null) return;
+
+    if (!note.labelIds.contains(labelId)) {
+      final updatedLabelIds = List<String>.from(note.labelIds)..add(labelId);
+      final updatedNote = note.copyWith(labelIds: updatedLabelIds);
+      await updateNote(updatedNote);
+    }
+  }
+
+  /// Remove label from note
+  static Future<void> removeLabelFromNote(String noteId, String labelId) async {
+    final note = getNoteById(noteId);
+    if (note == null) return;
+
+    if (note.labelIds.contains(labelId)) {
+      final updatedLabelIds = List<String>.from(note.labelIds)..remove(labelId);
+      final updatedNote = note.copyWith(labelIds: updatedLabelIds);
+      await updateNote(updatedNote);
+    }
+  }
 
   // ==================== FAVORITES OPERATIONS ====================
 
